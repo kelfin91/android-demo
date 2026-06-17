@@ -1,0 +1,193 @@
+pipeline {
+    agent any
+
+    environment {
+        // Android SDK 路径（与 Docker 挂载卷保持一致）
+        ANDROID_HOME = '/opt/android-sdk'
+        ANDROID_SDK_ROOT = '/opt/android-sdk'
+        // Gradle 守护进程相关
+        GRADLE_OPTS = '-Dorg.gradle.daemon=true -Dorg.gradle.parallel=true'
+        // APK 输出目录
+        APK_OUTPUT_DIR = '/var/www/apk'
+    }
+
+    parameters {
+        // 可选: 手动触发生成指定版本号
+        string(name: 'VERSION_NAME', defaultValue: '', description: '自定义版本号 (留空则使用 build.gradle.kts 中的默认值)')
+        string(name: 'VERSION_CODE', defaultValue: '', description: '自定义版本号 (留空则使用 build.gradle.kts 中的默认值)')
+    }
+
+    stages {
+
+        stage('Checkout') {
+            steps {
+                echo '========== 拉取代码 =========='
+                checkout scm
+
+                // 显示最后一次提交信息
+                script {
+                    def commitHash = sh(script: 'git rev-parse --short HEAD', returnStdout: true).trim()
+                    def commitMsg = sh(script: 'git log -1 --pretty=%B', returnStdout: true).trim()
+                    def branchName = sh(script: 'git rev-parse --abbrev-ref HEAD', returnStdout: true).trim()
+                    echo "分支: ${branchName}"
+                    echo "Commit: ${commitHash}"
+                    echo "消息: ${commitMsg}"
+                    currentBuild.description = "${branchName} @ ${commitHash}"
+                }
+            }
+        }
+
+        stage('Setup Keystore') {
+            steps {
+                echo '========== 配置签名密钥 =========='
+                // 从 Docker 环境变量获取签名信息（测试环境直接使用）
+                sh '''
+                    mkdir -p keystore
+                    cp ${KEYSTORE_PATH} keystore/demo.jks
+                    chmod 600 keystore/demo.jks
+                    echo "keystoreFilePath=keystore/demo.jks" > keystore.properties
+                    echo "keystorePassword=${KEYSTORE_PASSWORD}" >> keystore.properties
+                    echo "keyAlias=${KEY_ALIAS}" >> keystore.properties
+                    echo "keyPassword=${KEY_PASSWORD}" >> keystore.properties
+                    echo "密钥文件已就绪"
+                '''
+            }
+        }
+
+        stage('Build') {
+            steps {
+                echo '========== 开始构建 =========='
+
+                script {
+                    def assembleCmd = './gradlew assembleRelease --no-daemon --stacktrace'
+
+                    // 如果传入了版本号参数则使用
+                    if (params.VERSION_NAME) {
+                        assembleCmd += " -PversionName=${params.VERSION_NAME}"
+                    }
+                    if (params.VERSION_CODE) {
+                        assembleCmd += " -PversionCode=${params.VERSION_CODE}"
+                    }
+
+                    sh assembleCmd
+                }
+            }
+
+            post {
+                success {
+                    echo '✅ APK 构建成功'
+                }
+                failure {
+                    echo '❌ APK 构建失败，请检查日志'
+                }
+            }
+        }
+
+        stage('Unit Test') {
+            steps {
+                echo '========== 运行单元测试 =========='
+                sh './gradlew test --no-daemon'
+            }
+        }
+
+        stage('Archive Artifacts') {
+            steps {
+                echo '========== 归档构建产物 =========='
+
+                script {
+                    def apkFile = findFiles(glob: 'app/build/outputs/apk/release/*.apk')
+                    if (apkFile.length > 0) {
+                        def apkName = apkFile[0].name
+                        echo "APK 文件名: ${apkName}"
+                        echo "APK 大小: ${apkFile[0].length} bytes"
+                    }
+                }
+
+                // 归档 APK 到 Jenkins
+                archiveArtifacts artifacts: 'app/build/outputs/apk/release/*.apk', fingerprint: true
+
+                // 归档测试报告
+                archiveArtifacts artifacts: 'app/build/reports/tests/**/*.html', fingerprint: true, allowEmptyArchive: true
+
+                // 归档 mapping 文件（用于 Crash 反混淆）
+                archiveArtifacts artifacts: 'app/build/outputs/mapping/release/mapping.txt', fingerprint: true, allowEmptyArchive: true
+            }
+        }
+
+        stage('Deploy to Nginx') {
+            steps {
+                echo '========== 部署 APK 到 Nginx 下载目录 =========='
+
+                script {
+                    // 确保目标目录存在
+                    sh "mkdir -p ${APK_OUTPUT_DIR}"
+
+                    // 拷贝 APK 到 Nginx 静态目录
+                    def apkFiles = findFiles(glob: 'app/build/outputs/apk/release/*.apk')
+                    if (apkFiles.length > 0) {
+                        sh "cp app/build/outputs/apk/release/*.apk ${APK_OUTPUT_DIR}/"
+                        echo "APK 已部署到 ${APK_OUTPUT_DIR}"
+                    }
+
+                    // 生成下载页面
+                    def buildTime = sh(script: 'date "+%Y-%m-%d %H:%M:%S"', returnStdout: true).trim()
+                    def commitHash = sh(script: 'git rev-parse --short HEAD', returnStdout: true).trim()
+                    def apkName = apkFiles.length > 0 ? apkFiles[0].name : 'N/A'
+
+                    writeFile file: "${APK_OUTPUT_DIR}/index.html", text: """
+                        <!DOCTYPE html>
+                        <html>
+                        <head>
+                            <meta charset="UTF-8">
+                            <title>Android Demo - APK 下载</title>
+                            <style>
+                                body { font-family: -apple-system, sans-serif; max-width: 600px; margin: 50px auto; padding: 20px; }
+                                .card { background: #fff; border-radius: 12px; padding: 30px; box-shadow: 0 2px 8px rgba(0,0,0,0.1); }
+                                h1 { color: #1976D2; }
+                                .info { color: #666; margin: 8px 0; }
+                                .download-btn {
+                                    display: inline-block; margin-top: 20px; padding: 12px 32px;
+                                    background: #1976D2; color: #fff; text-decoration: none;
+                                    border-radius: 8px; font-size: 16px; font-weight: bold;
+                                }
+                                .download-btn:hover { background: #1565C0; }
+                            </style>
+</head>
+                        <body>
+                            <div class="card">
+                                <h1>Android Demo APK</h1>
+                                <p class="info">构建时间: ${buildTime}</p>
+                                <p class="info">Commit: ${commitHash}</p>
+                                <p class="info">Build: #${BUILD_NUMBER}</p>
+                                <a class="download-btn" href="${apkName}">下载 ${apkName}</a>
+                            </div>
+                        </body>
+                        </html>
+                    """.stripIndent()
+                }
+
+                echo "📦 APK 下载地址: http://<CVM-IP>/apk/"
+            }
+        }
+    }
+
+    post {
+        always {
+            // 清理工作区
+            cleanWs(cleanWhenNotBuilt: false,
+                    deleteDirs: false,
+                    disableDeferredWipeout: false,
+                    notFailBuild: true)
+        }
+        success {
+            echo '=================================='
+            echo '✅ 流水线执行成功！'
+            echo '=================================='
+        }
+        failure {
+            echo '=================================='
+            echo '❌ 流水线执行失败，请检查日志'
+            echo '=================================='
+        }
+    }
+}

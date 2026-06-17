@@ -1,0 +1,14 @@
+*.iml
+.gradle
+/local.properties
+/.idea
+.DS_Store
+/build
+/captures
+.externalNativeBuild
+.cxx
+local.properties
+
+# 签名密钥（敏感文件，切勿提交！）
+keystore/*.jks
+keystore/*.keystore

@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Android Demo</string>
+    <string name="build_info">v%1$s (Build %2$d)</string>
+    <string name="hello_message">🎉 Hello from Jenkins CI/CD!</string>
+</resources>

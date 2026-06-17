@@ -1,0 +1,33 @@
+# Jenkins 推荐插件清单
+# 启动 Jenkins 后可通过 Manage Jenkins > Plugins 批量安装
+
+# === Git 集成 ===
+git                        # Git SCM 支持
+github                     # GitHub 集成
+gitlab-plugin              # GitLab 集成
+
+# === Pipeline ===
+workflow-aggregator        # Pipeline 核心插件集
+pipeline-stage-view        # Pipeline 阶段可视化
+
+# === 凭据管理 ===
+credentials-binding        # 凭据绑定（用于注入密钥到 Pipeline）
+plain-credentials          # 纯文本凭据
+
+# === 构建通知 ===
+build-name-setter          # 自定义构建名称
+build-timestamp            # 构建时间戳
+email-ext                  # 扩展邮件通知
+# blueocean                # Blue Ocean 现代 UI（可选，体积较大）
+
+# === 工具与环境 ===
+gradle                     # Gradle 插件
+toolenv                    # 工具环境变量配置
+
+# === 安全 ===
+role-strategy              # 基于角色的权限控制
+matrix-auth                # 矩阵授权策略
+
+# === 界面 ===
+dark-theme                 # 暗色主题（可选）
+simple-theme-plugin        # 自定义主题（可选）
