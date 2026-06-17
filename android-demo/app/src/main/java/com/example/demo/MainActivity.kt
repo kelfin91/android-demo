@@ -2,6 +2,7 @@ package com.example.demo
 
 import android.os.Bundle
 import androidx.appcompat.app.AppCompatActivity
+import com.example.demo.BuildConfig
 import com.example.demo.databinding.ActivityMainBinding
 
 class MainActivity : AppCompatActivity() {
